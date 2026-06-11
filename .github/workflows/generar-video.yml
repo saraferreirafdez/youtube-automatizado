@@ -2,7 +2,7 @@ name: Generar Video YouTube
 
 on:
   schedule:
-    - cron: '0 6 * * *'
+    - cron: '0 20 * * *'
   workflow_dispatch:
 
 jobs:
@@ -11,7 +11,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       
-      - name: Instalar Python
+      - name: Instalar Python y ffmpeg
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
@@ -21,14 +21,7 @@ jobs:
           pip install requests flask
           sudo apt-get install -y ffmpeg
           
-      - name: Descargar audio de Google Drive
-        run: |
-          python -c "
-          import requests, os
-          print('Listo para recibir audio')
-          "
-          
-      - name: Ejecutar script
+      - name: Ejecutar script de video
         env:
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
-        run: echo 'Script listo'
+        run: python montar_video.py
