@@ -51,7 +51,14 @@ jobs:
           PALABRAS=$(cat palabras_clave.txt)
           python montar_video.py audio_narrado.wav "$PALABRAS" video_final.mp4
 
-      # ── 7. Guardar artefactos ─────────────────────────────────────────────────
+      # ── 7. Publicar en YouTube vía GitHub Release + Make.com webhook ──────────
+      - name: Subir a YouTube
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python subir_video.py video_final.mp4 guion.txt titulo_video.txt palabras_clave.txt
+
+      # ── 8. Guardar artefactos (backup local 7 días) ───────────────────────────
       - name: Guardar vídeo final
         uses: actions/upload-artifact@v4
         with:
