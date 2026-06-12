@@ -19,8 +19,18 @@ jobs:
       - name: Instalar dependencias
         run: |
           pip install requests flask
+          pip install chatterbox-tts
           sudo apt-get install -y ffmpeg
           
+      - name: Probar voz clonada
+        run: python generar_voz.py "Hola, soy Sara. Esta es una prueba de mi voz clonada para el canal Universo de la Mente. ¿Qué siente un narcisista cuando lo ignoras completamente? Hoy vamos a descubrirlo juntas." prueba_voz.wav
+
+      - name: Guardar audio de prueba
+        uses: actions/upload-artifact@v4
+        with:
+          name: prueba-voz-sara
+          path: prueba_voz.wav
+
       - name: Ejecutar script de video
         env:
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
