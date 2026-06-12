@@ -2,36 +2,76 @@ name: Generar Video YouTube
 
 on:
   schedule:
-    - cron: '0 20 * * *'
-  workflow_dispatch:
+    - cron: '0 20 * * *'   # Cada día a las 20:00 UTC (22:00 España)
+  workflow_dispatch:        # También se puede lanzar manualmente
 
 jobs:
   generar:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
+
     steps:
+      # ── 1. Checkout del repositorio ──────────────────────────────────────────
       - uses: actions/checkout@v3
-      
-      - name: Instalar Python y ffmpeg
+
+      # ── 2. Python 3.11 ───────────────────────────────────────────────────────
+      - name: Instalar Python 3.11
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
-          
+
+      # ── 3. Dependencias ──────────────────────────────────────────────────────
       - name: Instalar dependencias
         run: |
-          pip install requests flask
+          pip install requests
           pip install chatterbox-tts
           sudo apt-get install -y ffmpeg
-          
-      - name: Probar voz clonada
-        run: python generar_voz.py "Hola, soy Sara. Esta es una prueba de mi voz clonada para el canal Universo de la Mente. ¿Qué siente un narcisista cuando lo ignoras completamente? Hoy vamos a descubrirlo juntas." prueba_voz.wav
 
-      - name: Guardar audio de prueba
-        uses: actions/upload-artifact@v4
-        with:
-          name: prueba-voz-sara
-          path: prueba_voz.wav
+      # ── 4. Generar guión en español de España ────────────────────────────────
+      - name: Generar guión
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          python generar_guion.py > guion.txt
+          echo "=== GUIÓN GENERADO ==="
+          cat guion.txt
+          echo "=== FIN DEL GUIÓN ==="
+          echo "Palabras clave:"
+          cat palabras_clave.txt
 
-      - name: Ejecutar script de video
+      # ── 5. Generar voz clonada (Chatterbox, español de España) ───────────────
+      - name: Generar voz clonada
+        run: python generar_voz.py guion.txt audio_narrado.wav
+
+      # ── 6. Montar vídeo con imágenes de Pexels ───────────────────────────────
+      - name: Montar vídeo
         env:
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
-        run: python montar_video.py
+        run: |
+          PALABRAS=$(cat palabras_clave.txt)
+          python montar_video.py audio_narrado.wav "$PALABRAS" video_final.mp4
+
+      # ── 7. Guardar artefactos ─────────────────────────────────────────────────
+      - name: Guardar vídeo final
+        uses: actions/upload-artifact@v4
+        with:
+          name: video-universo-mente
+          path: video_final.mp4
+          retention-days: 7
+
+      - name: Guardar audio narrado
+        uses: actions/upload-artifact@v4
+        with:
+          name: audio-narrado
+          path: audio_narrado.wav
+          retention-days: 7
+
+      - name: Guardar guión
+        uses: actions/upload-artifact@v4
+        with:
+          name: guion-texto
+          path: |
+            guion.txt
+            titulo_video.txt
+            palabras_clave.txt
+          retention-days: 7
