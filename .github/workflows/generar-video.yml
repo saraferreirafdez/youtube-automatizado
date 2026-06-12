@@ -12,11 +12,11 @@ jobs:
 
     steps:
       # ── 1. Checkout del repositorio ──────────────────────────────────────────
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       # ── 2. Python 3.11 ───────────────────────────────────────────────────────
       - name: Instalar Python 3.11
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
