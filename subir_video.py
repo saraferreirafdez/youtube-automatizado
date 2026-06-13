@@ -3,7 +3,8 @@
 Subir Video a YouTube vía GitHub Release + Make.com webhook
 ============================================================
 1. Crea un GitHub Release con el video como asset público
-2. Llama al webhook de Make.com con la URL pública del video + metadatos
+2. Verifica que la URL es descargable (sigue 302 redirects, valida tamaño)
+3. Llama al webhook de Make.com con la URL pública del video + metadatos
 Make.com descarga el video y lo sube a YouTube automáticamente.
 
 Uso (desde GitHub Actions):
@@ -12,8 +13,10 @@ Uso (desde GitHub Actions):
 import sys
 import os
 import json
+import time
 import requests
 from datetime import datetime
+from typing import Tuple
 
 
 GITHUB_API = "https://api.github.com"
@@ -100,6 +103,100 @@ def subir_asset(upload_url: str, token: str, video_path: str) -> str:
     return browser_download_url
 
 
+def verificar_url_descargable(video_url: str, max_intentos: int = 3) -> Tuple[bool, str]:
+    """
+    Verifica que la URL del video es realmente descargable.
+    Sigue redirects (302, 301, etc.) y valida Content-Type y Content-Length.
+
+    Retorna: (es_valida, mensaje_diagnostico)
+    Implementa reintentos con backoff exponencial en caso de fallos temporales.
+    """
+    intentos_restantes = max_intentos
+    espera_base = 2  # segundos
+
+    while intentos_restantes > 0:
+        try:
+            log(f"Verificando URL ({max_intentos - intentos_restantes + 1}/{max_intentos})...")
+            log(f"  URL: {video_url}")
+
+            # HEAD request con allow_redirects=True para obtener metadatos sin descargar el archivo
+            inicio = time.time()
+            resp = requests.head(
+                video_url,
+                allow_redirects=True,
+                timeout=20
+            )
+            tiempo_respuesta = time.time() - inicio
+
+            # Loguear cadena de redirects
+            if resp.history:
+                log(f"  Redirects seguidos:")
+                for i, redir in enumerate(resp.history, 1):
+                    log(f"    {i}. {redir.status_code} → {redir.url[:70]}...")
+                log(f"  URL final: {resp.url[:70]}...")
+
+            log(f"  Código HTTP: {resp.status_code}")
+
+            # Validar respuesta
+            if resp.status_code != 200:
+                log(f"  ✗ Error: esperado 200, recibido {resp.status_code}")
+                intentos_restantes -= 1
+                if intentos_restantes > 0:
+                    espera = espera_base ** (max_intentos - intentos_restantes)
+                    log(f"  Reintentando en {espera}s...")
+                    time.sleep(espera)
+                continue
+
+            # Validar Content-Type
+            content_type = resp.headers.get("Content-Type", "").lower()
+            if "video/mp4" not in content_type and "application/octet-stream" not in content_type:
+                log(f"  ⚠ Warning: Content-Type inesperado: {content_type}")
+
+            # Validar tamaño
+            content_length = resp.headers.get("Content-Length", "0")
+            try:
+                tamaño_bytes = int(content_length)
+            except ValueError:
+                tamaño_bytes = 0
+
+            if tamaño_bytes == 0:
+                log(f"  ✗ Error: Content-Length no disponible o es 0")
+                intentos_restantes -= 1
+                if intentos_restantes > 0:
+                    espera = espera_base ** (max_intentos - intentos_restantes)
+                    log(f"  Reintentando en {espera}s...")
+                    time.sleep(espera)
+                continue
+
+            tamaño_mb = tamaño_bytes / (1024 * 1024)
+            log(f"  Content-Length: {tamaño_bytes:,} bytes ({tamaño_mb:.1f} MB)")
+            log(f"  Content-Type: {content_type}")
+            log(f"  Tiempo respuesta: {tiempo_respuesta:.2f}s")
+            log(f"  ✓ URL verificada y descargable")
+
+            return True, f"URL válida: {tamaño_bytes} bytes, {content_type}"
+
+        except requests.exceptions.Timeout:
+            log(f"  ✗ Timeout: no hubo respuesta en 20s")
+            intentos_restantes -= 1
+            if intentos_restantes > 0:
+                espera = espera_base ** (max_intentos - intentos_restantes)
+                log(f"  Reintentando en {espera}s...")
+                time.sleep(espera)
+
+        except requests.exceptions.RequestException as e:
+            log(f"  ✗ Error de red: {e}")
+            intentos_restantes -= 1
+            if intentos_restantes > 0:
+                espera = espera_base ** (max_intentos - intentos_restantes)
+                log(f"  Reintentando en {espera}s...")
+                time.sleep(espera)
+
+    # Si llegamos aquí, todos los intentos fallaron
+    log(f"  ✗ FALLÓ: URL no es descargable después de {max_intentos} intentos")
+    return False, "URL no verificable después de reintentos"
+
+
 def llamar_webhook(video_url: str, titulo: str, descripcion: str, tags: list):
     """Llama al webhook de Make.com con los metadatos del video."""
     payload = {
@@ -111,6 +208,7 @@ def llamar_webhook(video_url: str, titulo: str, descripcion: str, tags: list):
     log(f"Llamando webhook Make.com...")
     log(f"  Título: {titulo}")
     log(f"  URL: {video_url}")
+    log(f"  Tags: {tags}")
     resp = requests.post(
         MAKE_WEBHOOK_URL,
         headers={"Content-Type": "application/json"},
@@ -119,7 +217,8 @@ def llamar_webhook(video_url: str, titulo: str, descripcion: str, tags: list):
     )
     resp.raise_for_status()
     log(f"✓ Webhook enviado — Make.com subirá el video a YouTube")
-    log(f"  Respuesta: {resp.text[:200]}")
+    log(f"  Código respuesta: {resp.status_code}")
+    log(f"  Respuesta (primeros 200 chars): {resp.text[:200]}")
 
 
 def main():
@@ -152,6 +251,19 @@ def main():
 
     release_id, upload_url = crear_release(owner, repo, token, tag, titulo)
     video_url = subir_asset(upload_url, token, video_path)
+
+    # Verificar que la URL es descargable antes de llamar a Make.com
+    log("")
+    log("=" * 50)
+    log("VERIFICACIÓN DE DESCARGABILIDAD")
+    log("=" * 50)
+    es_valida, diagnostico = verificar_url_descargable(video_url, max_intentos=3)
+    if not es_valida:
+        log("ERROR: La URL no es descargable. Abortando...")
+        log(diagnostico)
+        sys.exit(1)
+    log("")
+
     llamar_webhook(video_url, titulo, descripcion, tags)
 
     log("=" * 50)
