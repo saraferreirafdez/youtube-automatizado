@@ -103,13 +103,16 @@ def subir_asset(upload_url: str, token: str, video_path: str) -> str:
     return browser_download_url
 
 
-def verificar_url_descargable(video_url: str, max_intentos: int = 3) -> Tuple[bool, str]:
+def verificar_url_descargable(video_url: str, max_intentos: int = 3) -> Tuple[bool, str, str]:
     """
     Verifica que la URL del video es realmente descargable.
     Sigue redirects (302, 301, etc.) y valida Content-Type y Content-Length.
 
-    Retorna: (es_valida, mensaje_diagnostico)
+    Retorna: (es_valida, mensaje_diagnostico, url_final_resuelta)
     Implementa reintentos con backoff exponencial en caso de fallos temporales.
+
+    La URL final resuelta es lo que debe enviarse al webhook (no la original con redirect).
+    Si no hay redirect, devuelve la URL original como fallback.
     """
     intentos_restantes = max_intentos
     espera_base = 2  # segundos
@@ -117,7 +120,7 @@ def verificar_url_descargable(video_url: str, max_intentos: int = 3) -> Tuple[bo
     while intentos_restantes > 0:
         try:
             log(f"Verificando URL ({max_intentos - intentos_restantes + 1}/{max_intentos})...")
-            log(f"  URL: {video_url}")
+            log(f"  URL original: {video_url}")
 
             # HEAD request con allow_redirects=True para obtener metadatos sin descargar el archivo
             inicio = time.time()
@@ -128,12 +131,17 @@ def verificar_url_descargable(video_url: str, max_intentos: int = 3) -> Tuple[bo
             )
             tiempo_respuesta = time.time() - inicio
 
+            # Capturar URL final resuelta (tras seguir redirects)
+            url_final = resp.url
+
             # Loguear cadena de redirects
             if resp.history:
                 log(f"  Redirects seguidos:")
                 for i, redir in enumerate(resp.history, 1):
                     log(f"    {i}. {redir.status_code} → {redir.url[:70]}...")
-                log(f"  URL final: {resp.url[:70]}...")
+                log(f"  URL final (resuelta): {url_final[:70]}...")
+            else:
+                log(f"  Sin redirects (URL original es final)")
 
             log(f"  Código HTTP: {resp.status_code}")
 
@@ -174,7 +182,7 @@ def verificar_url_descargable(video_url: str, max_intentos: int = 3) -> Tuple[bo
             log(f"  Tiempo respuesta: {tiempo_respuesta:.2f}s")
             log(f"  ✓ URL verificada y descargable")
 
-            return True, f"URL válida: {tamaño_bytes} bytes, {content_type}"
+            return True, f"URL válida: {tamaño_bytes} bytes, {content_type}", url_final
 
         except requests.exceptions.Timeout:
             log(f"  ✗ Timeout: no hubo respuesta en 20s")
@@ -194,7 +202,7 @@ def verificar_url_descargable(video_url: str, max_intentos: int = 3) -> Tuple[bo
 
     # Si llegamos aquí, todos los intentos fallaron
     log(f"  ✗ FALLÓ: URL no es descargable después de {max_intentos} intentos")
-    return False, "URL no verificable después de reintentos"
+    return False, "URL no verificable después de reintentos", video_url
 
 
 def llamar_webhook(video_url: str, titulo: str, descripcion: str, tags: list):
@@ -253,18 +261,25 @@ def main():
     video_url = subir_asset(upload_url, token, video_path)
 
     # Verificar que la URL es descargable antes de llamar a Make.com
+    # y capturar la URL final resuelta (tras seguir redirects)
     log("")
     log("=" * 50)
-    log("VERIFICACIÓN DE DESCARGABILIDAD")
+    log("VERIFICACIÓN Y RESOLUCIÓN DE URL")
     log("=" * 50)
-    es_valida, diagnostico = verificar_url_descargable(video_url, max_intentos=3)
+    es_valida, diagnostico, url_final = verificar_url_descargable(video_url, max_intentos=3)
     if not es_valida:
         log("ERROR: La URL no es descargable. Abortando...")
         log(diagnostico)
         sys.exit(1)
     log("")
 
-    llamar_webhook(video_url, titulo, descripcion, tags)
+    # Usar la URL final resuelta para el webhook (Make no debe depender de seguir redirects)
+    log(f"URL para webhook:")
+    log(f"  Original (GitHub Release): {video_url[:80]}...")
+    log(f"  Final (directa):           {url_final[:80]}...")
+    log("")
+
+    llamar_webhook(url_final, titulo, descripcion, tags)
 
     log("=" * 50)
     log("✅ PIPELINE COMPLETO")
