@@ -11,23 +11,24 @@ permissions:
 jobs:
   generar:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
 
     steps:
       # ── 1. Checkout del repositorio ──────────────────────────────────────────
       - uses: actions/checkout@v4
 
-      # ── 2. Python 3.11 ───────────────────────────────────────────────────────
+      # ── 2. Python 3.11 ───────────────────────────────────────────────────
       - name: Instalar Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      # ── 3. Dependencias ──────────────────────────────────────────────────────
+      # ── 3. Dependencias ──────────────────────────────────────────────────
       - name: Instalar dependencias
         run: |
           pip install requests
           pip install chatterbox-tts
+          pip install faster-whisper
           sudo apt-get install -y ffmpeg
 
       # ── 4. Generar guión en español de España ────────────────────────────────
@@ -46,7 +47,7 @@ jobs:
       - name: Generar voz clonada
         run: python generar_voz.py guion.txt audio_narrado.wav
 
-      # ── 6. Montar vídeo con imágenes de Pexels ───────────────────────────────
+      # ── 6. Montar vídeo (clips Pexels + subtítulos palabra por palabra) ───────
       - name: Montar vídeo
         env:
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
